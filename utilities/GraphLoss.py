@@ -19,5 +19,3 @@ def avg_loss(period):
     plt.plot(x, y_cls, y_box)
     plt.show()
 
-avg_loss(100)
-avg_loss(100, 'cls_loss')

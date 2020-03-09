@@ -1,6 +1,5 @@
-from __future__ import print_function, division
-from PIL import Image
-import torchvision.transforms.functional as F
+# from __future__ import print_function, division
+
 import random
 from pathlib import Path
 
@@ -9,12 +8,11 @@ import skimage
 import skimage.color
 import skimage.io
 import skimage.transform
+import skimage.util
 import torch
 from pycocotools.coco import COCO
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
-from torchvision.transforms import ToPILImage, ToTensor
-import skimage.util
 
 
 class CocoDataset(Dataset):
@@ -25,7 +23,7 @@ class CocoDataset(Dataset):
         self.categories = categories
         self.visualization = sort
         file_name = '.'.join([self.set_name, 'json'])
-
+        
         self.root_dir = Path(self.root_dir).joinpath(self.set_name, 'images')
         if sub_dir is not None:
             self.json_path = self.root_dir.joinpath(sub_dir, file_name)
@@ -37,7 +35,7 @@ class CocoDataset(Dataset):
             self.image_ids.sort()  # careful sorting as it could possibly return a none type
         self.labels, self.classes, self.coco_labels, self.coco_labels_inverse = dict(), dict(), dict(), dict()
         self.load_classes()
-
+    
     def load_classes(self):
         # load class names (name -> label)
         if self.categories is None:
@@ -51,10 +49,10 @@ class CocoDataset(Dataset):
             self.classes[c['name']] = len(self.classes)
         for key, value in self.classes.items():
             self.labels[value] = key
-
+    
     def __len__(self):
         return len(self.image_ids)
-
+    
     def __getitem__(self, idx):
         img = self.load_image(idx)
         annot = self.load_annotations(idx)
@@ -65,7 +63,7 @@ class CocoDataset(Dataset):
         if self.transform:
             sample = self.transform(sample)
         return sample
-
+    
     def naive_getitem(self, idx):
         img = self.load_image(idx)
         annot = self.load_annotations(idx)
@@ -74,10 +72,10 @@ class CocoDataset(Dataset):
         if self.visualization is True:
             print(info['file_name'])
         return sample
-
+    
     def load_image_info(self, idx):
         return self.coco.loadImgs(self.image_ids[idx])[0]
-
+    
     def load_image(self, image_index):
         image_info = self.coco.loadImgs(self.image_ids[image_index])[0]
         path = str(self.root_dir.joinpath(image_info['file_name']))
@@ -85,7 +83,7 @@ class CocoDataset(Dataset):
         if len(img.shape) == 2:
             img = skimage.color.gray2rgb(img)
         return img.astype(np.float32) / 255.0
-
+    
     def load_annotations(self, image_index):
         # get ground truth annotations
         annotations_ids = self.coco.getAnnIds(imgIds=self.image_ids[image_index], iscrowd=False)
@@ -97,33 +95,33 @@ class CocoDataset(Dataset):
         # parse annotations
         coco_annotations = self.coco.loadAnns(annotations_ids)
         for idx, a in enumerate(coco_annotations):
-
+            
             # some annotations have basically no width / height, skip them
             if a['bbox'][2] < 1 or a['bbox'][3] < 1:
                 continue
             if a['category_id'] == 0:
                 continue
-
+            
             annotation = np.zeros((1, 5))
             annotation[0, :4] = a['bbox']
             annotation[0, 4] = self.coco_label_to_label(a['category_id'])
             annotations = np.append(annotations, annotation, axis=0)
-
+        
         # transform from [x, y, w, h] to [x1, y1, x2, y2]
         annotations[:, 2] = annotations[:, 0] + annotations[:, 2]
         annotations[:, 3] = annotations[:, 1] + annotations[:, 3]
         return annotations
-
+    
     def coco_label_to_label(self, coco_label):
         return self.coco_labels_inverse[coco_label]
-
+    
     def label_to_coco_label(self, label):
         return self.coco_labels[label]
-
+    
     def image_aspect_ratio(self, image_index):
         image = self.coco.loadImgs(self.image_ids[image_index])[0]
         return float(image['width']) / float(image['height'])
-
+    
     @staticmethod
     def num_classes():
         return 12
@@ -134,19 +132,19 @@ def collater(data):
     annots = [s['annot'] for s in data]
     scales = [s['scale'] for s in data]
     info = [s['info'] for s in data]
-
+    
     widths = [int(s.shape[0]) for s in imgs]
     heights = [int(s.shape[1]) for s in imgs]
     batch_size = len(imgs)
     max_width = np.array(widths).max()
     max_height = np.array(heights).max()
-
+    
     padded_imgs = torch.zeros(batch_size, max_width, max_height, 3)
     for i in range(batch_size):
         img = imgs[i]
         padded_imgs[i, :int(img.shape[0]), :int(img.shape[1]), :] = img
     max_num_annots = max(annot.shape[0] for annot in annots)
-
+    
     if max_num_annots > 0:
         annot_padded = torch.ones((len(annots), max_num_annots, 5)) * -1
         if max_num_annots > 0:
@@ -157,69 +155,97 @@ def collater(data):
     else:
         annot_padded = torch.ones((len(annots), 1, 5)) * -1
     padded_imgs = padded_imgs.permute(0, 3, 1, 2)
-
+    
     return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales, 'info': info}
 
 
 class RandomCropOrScale(object):
-    """Convert ndarrays in sample to Tensors."""
+    """
+    This class will chose at random whether to (random) crop an image or rescale an image.
+    The cropping method will loop through possible crops to ensure that the resulting cropped
+    image contains annotations.  Note that by cropping, we may (usually) loose some annotations,
+    so we're loosing information essentially.
 
+    # TODO: Implement a RandomScaleAndCrop function
+    """
+    
     def __init__(self, min_w=1344, min_h=756, p=0.5):
+        self.p = p
         self.min_w = min_w
         self.min_h = min_h
         self.min_side = min(min_w, min_h)
         self.max_side = max(min_w, min_h)
-        self.p = p
-
+    
     def __call__(self, sample):
-        self.random_crop(sample)
-
-    def random_crop(self, sample):
-        # img, annots, info = sample['img'], sample['annot'], sample['info']
-        img, _annots = sample['img'], sample['annot']
-        info = sample['info']
-        rows, cols, cns = img.shape
-        input_image_width = max(rows, cols)
-        input_image_height = min(rows, cols)
-        # print(sample.keys())
-        # w, h = image.size
-        if input_image_width == self.min_w and input_image_height == self.min_h:
-            return {'img': torch.from_numpy(img), 'annot': torch.from_numpy(annots), 'scale': 1, 'info': info}
-        top_edge = random.randint(0, input_image_height - self.min_h)
-        left_edge = random.randint(0, input_image_width - self.min_w)
+        self.sample = sample
+        self.img = self.sample['img']
+        self.annot = self.sample['annot']
+        return self.random_crop_or_rescale()
+    
+    def random_crop_or_rescale(self):
+        if np.random.rand() > self.p:
+            return self.random_crop()
+        else:
+            return self.rescale()
+    
+    def random_crop(self):
+        input_img_w = max(self.img.shape[:2])
+        input_img_h = min(self.img.shape[:2])
+        if input_img_w == self.min_w and input_img_h == self.min_h:
+            return self.sample
+        cropped_annos = False
+        while cropped_annos is False:
+            crops = self.get_cropped_indices(input_img_w, input_img_h)
+            cropped_annos = self.crop_annotations(crops)
+        cropped_img = self.cropped_image(crops, input_img_w, input_img_h)
+        return {'img'  : torch.from_numpy(cropped_img),
+                'annot': torch.from_numpy(cropped_annos),
+                'info' : self.annot['info'],
+                'scale': 1}
+    
+    def get_cropped_indices(self, input_img_w, input_img_h):
+        # Generate random initial point for crop
+        left_edge = random.randint(0, input_img_w - self.min_w)
+        top_edge = random.randint(0, input_img_h - self.min_h)
         right_edge = left_edge + self.min_w
         bottom_edge = top_edge + self.min_h
-
-        bottom_crop = abs(bottom_edge - input_image_height)
-        right_crop = abs(right_edge - input_image_width)
-
+        return {'left_edge': left_edge, 'top_edge': top_edge, 'right_edge': right_edge, 'bottom_edge': bottom_edge}
+    
+    def cropped_image(self, crops, input_img_w, input_img_h):
+        left_edge, top_edge, right_edge, bottom_edge = list(crops.values())
+        bottom_crop = abs(bottom_edge - input_img_h)
+        right_crop = abs(right_edge - input_img_w)
         _crop = ((top_edge, bottom_crop), (left_edge, right_crop), (0, 0))
-        image = skimage.util.crop(ar=img, crop_width=_crop, copy=True)
-        # visualize_tensor(image)
-
-        # annotation begins before left edge
-        # x1, y1, x2, y2, lbl = annots
-        annots = _annots.copy()
-        x1 = annots[:, 0]
-        x1[x1 < left_edge] = 0
-        annots[:, 0] = x1
-        # annotation begins before top edge
-        y1 = annots[:, 1]
-        y1[y1 < top_edge] = 0
-        annots[:, 1] = y1
-        # annotation extends beyond right edge
-        x2 = annots[:, 2]
-        x2[x2 > right_edge] = self.min_w
-        annots[:, 0] = x2
-        # annotation extends beyond bottom edge
-        y2 = annots[:, 3]
-        y2[y2 > bottom_edge] = self.min_h
-        annots[:, 3] = y2
-        # return {'img': torch.from_numpy(image), 'annot': torch.from_numpy(annots), 'scale': 1, 'info': info}
-        return {'img': torch.from_numpy(image.copy()), 'annot': torch.from_numpy(annots), 'scale': 1, 'info': info}
-
-    def rescale(self, sample):
-        image, annots = sample['img'], sample['annot']
+        return skimage.util.crop(ar=self.img, crop_width=_crop, copy=True)
+    
+    def crop_annotations(self, crops):
+        left_edge, top_edge, right_edge, bottom_edge = list(crops.values())
+        annots = self.annot.copy()
+        x1, y1, x2, y2, lbl = np.hsplit(annots, 5)
+        p1 = np.array(list(zip(x1[:, 0], y1[:, 0])))
+        p2 = np.array(list(zip(x2[:, 0], y2[:, 0])))
+        cropped_img_p1 = np.array([left_edge, top_edge])
+        cropped_img_p2 = np.array([right_edge, bottom_edge])
+        p1_any = np.all((p1 > cropped_img_p1) & (p1 < cropped_img_p2), axis=1)
+        p2_any = np.all((p2 > cropped_img_p1) & (p2 < cropped_img_p2), axis=1)
+        rows_to_crop = p1_any | p2_any
+        crop = np.array([left_edge, top_edge, left_edge, top_edge, 0])
+        # Shift annotations up and to the left, this takes care of any annotations
+        # who's points exceed the left and top coordinaes of the cropped image
+        annots = annots[rows_to_crop] - crop
+        # And now set any points that lay outside the bottom and right
+        # of the cropped coordinates to the edge of cropped coords.
+        annots[annots[:, 2] > self.min_w, 2] = self.min_w
+        annots[annots[:, 3] > self.min_h, 3] = self.min_h
+        if annots.size == 0:
+            print('Cropped image contains no annotations.  Skipping...')
+            return False
+        else:
+            return annots
+    
+    def rescale(self):
+        image = self.img.copy()
+        annots = self.annot.copy()
         rows, cols, cns = image.shape
         smallest_side = min(rows, cols)
         # rescale the image so the smallest side is min_side
@@ -237,7 +263,10 @@ class RandomCropOrScale(object):
         new_image = np.zeros((rows + pad_w, cols + pad_h, cns)).astype(np.float32)
         new_image[:rows, :cols, :] = image.astype(np.float32)
         annots[:, :4] *= scale
-        return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale}
+        return {'img'  : torch.from_numpy(new_image),
+                'annot': torch.from_numpy(annots),
+                'info' : self.annot['info'],
+                'scale': scale}
 
 
 class Resizer(object):
@@ -246,7 +275,7 @@ class Resizer(object):
     # def __init__(self, max_side=1024, min_side=608):
     #     self.min_side = min_side
     #     self.max_side = max_side
-
+    
     def __call__(self, sample, max_side=1344, min_side=756):
         image, annots = sample['img'], sample['annot']
         rows, cols, cns = image.shape
@@ -272,36 +301,36 @@ class Resizer(object):
 
 class Augmenter(object):
     """Convert ndarrays in sample to Tensors."""
-
+    
     def __call__(self, sample, flip_x=0.5):
         if np.random.rand() < flip_x:
             image, annots = sample['img'], sample['annot']
             image = image[:, ::-1, :]
-
+            
             rows, cols, channels = image.shape
-
+            
             x1 = annots[:, 0].copy()
             x2 = annots[:, 2].copy()
-
+            
             x_tmp = x1.copy()
-
+            
             annots[:, 0] = cols - x2
             annots[:, 2] = cols - x_tmp
-
+            
             sample = {'img': image, 'annot': annots, 'info': sample['info']}
-
+        
         return sample
 
 
 class Normalizer(object):
-
+    
     def __init__(self):
         self.mean = np.array([[[0.485, 0.456, 0.406]]])
         self.std = np.array([[[0.229, 0.224, 0.225]]])
-
+    
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
-
+        
         return {'img': ((image.astype(np.float32) - self.mean) / self.std), 'annot': annots, 'info': sample['info']}
 
 
@@ -315,7 +344,7 @@ class UnNormalizer(object):
             self.std = [0.229, 0.224, 0.225]
         else:
             self.std = std
-
+    
     def __call__(self, tensor):
         """
         Args:
@@ -336,19 +365,19 @@ class AspectRatioBasedSampler(Sampler):
         self.drop_last = drop_last
         self.shuffle = shuffle
         self.groups = self.group_images()
-
+    
     def __iter__(self):
         if self.shuffle is True:
             random.shuffle(self.groups)
         for group in self.groups:
             yield group
-
+    
     def __len__(self):
         if self.drop_last:
             return len(self.data_source) // self.batch_size
         else:
             return (len(self.data_source) + self.batch_size - 1) // self.batch_size
-
+    
     def group_images(self):
         order = list(range(len(self.data_source)))
         if self.shuffle is True:
@@ -385,10 +414,10 @@ class AspectRatioBasedSampler(Sampler):
 #         return [[order[x % len(order)] for x in range(i, i + self.batch_size)] for i in
 #                 range(0, len(order), self.batch_size)]
 
-        # order.sort(key=lambda x: self.data_source.image_aspect_ratio(x))
-        # # divide into groups, one group = one batch
-        # return [[order[x % len(order)] for x in range(i, i + self.batch_size)] for i in
-        #         range(0, len(order), self.batch_size)]
+# order.sort(key=lambda x: self.data_source.image_aspect_ratio(x))
+# # divide into groups, one group = one batch
+# return [[order[x % len(order)] for x in range(i, i + self.batch_size)] for i in
+#         range(0, len(order), self.batch_size)]
 
 #
 # if __name__ == '__main__':
@@ -407,3 +436,6 @@ class AspectRatioBasedSampler(Sampler):
 # # transform=transforms.Compose([RandomCropOrScale(),
 # #                               Normalizer(), Augmenter(),
 # #                               ]))
+
+if __name__ == '__main__':
+    pass

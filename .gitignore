@@ -1,3 +1,21 @@
+# local files
+/savefiles/**
+/retinanet-examples/**
+/models/**
+/a_cocoeval.py
+/nv_infer.py
+/oid_dataset.py
+/csv_eval.py
+/coco_eval.py
+/coco_validation.py
+/train.py
+**/*.pth
+/resnet50-19c8e357.pth
+.archive/
+.idea/
+*.iml
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

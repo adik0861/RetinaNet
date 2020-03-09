@@ -88,7 +88,7 @@ class Initialization:
                            {'id': 11, 'name': 'others', 'supercategory': 'other'}]
     
     @staticmethod
-    def initialize_subdirectories(self):
+    def initialize_subdirectories():
         save_dir = Path('savefiles')
         checkpoint_dir = save_dir.joinpath('checkpoints')
         checkpoint_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
@@ -335,16 +335,3 @@ class RetinaNet(Initialization):
                     print(ls[0])
             self.epoch_loss.append(classification_loss + regression_loss)
     
-    # def get_training_transforms(self, training_dataset):
-    #     # Determine smallest resolution image and create transform to images to this size at random
-    #     a = {v['height'] * v['width']: [v['width'], v['height']] for v in self.training_dataset.coco.imgs.values()}
-    #     min_resolution = a[min(a.keys())]
-    #     _randomcrop = transforms.RandomCrop(min_resolution)
-    #     _normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], inplace=True)
-    #     _randomflip = transforms.RandomHorizontalFlip(p=0.1)
-    #     _totensor = transforms.ToTensor()
-    #     # _resize = transforms.Resize()
-    #     _transforms = [_normalize, _randomcrop, _randomflip, _totensor]
-    #
-    # def get_training_dataset(self):
-    #     training_dataset = CocoDataset(root_dir=self.root_dir, set_name='train', transform=None)
