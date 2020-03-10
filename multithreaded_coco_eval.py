@@ -51,8 +51,8 @@ class MultithreadedCOCOEval:
         coco_eval = COCOeval(coco_true, coco_pred, 'bbox')
         coco_eval.params.imgIds = self.image_ids
         coco_eval.evaluate()
-        coco_eval.accumulate()
-        coco_eval.summarize()
+        # coco_eval.accumulate()
+        # coco_eval.summarize()
         self.model.train()
         self.pbar.close()
         return

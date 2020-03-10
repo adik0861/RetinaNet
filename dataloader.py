@@ -2,7 +2,7 @@
 
 import random
 from pathlib import Path
-
+import torchvision.transforms.functional as F
 import numpy as np
 import skimage
 import skimage.color
@@ -180,7 +180,15 @@ class RandomCropOrScale(object):
         self.sample = sample
         self.img = self.sample['img']
         self.annot = self.sample['annot']
-        return self.random_crop_or_rescale()
+        self.input_img_w = max(self.img.shape[:2])
+        self.input_img_h = min(self.img.shape[:2])
+        if self.input_img_w == self.min_w and self.input_img_h == self.min_h:
+            return {'img'  : torch.from_numpy(self.img.copy()),
+                    'annot': torch.from_numpy(self.annot.copy()),
+                    'info' : self.sample['info'].copy(),
+                    'scale': 1}
+        else:
+            return self.random_crop_or_rescale()
     
     def random_crop_or_rescale(self):
         if np.random.rand() > self.p:
@@ -189,34 +197,34 @@ class RandomCropOrScale(object):
             return self.rescale()
     
     def random_crop(self):
-        input_img_w = max(self.img.shape[:2])
-        input_img_h = min(self.img.shape[:2])
-        if input_img_w == self.min_w and input_img_h == self.min_h:
-            return self.sample
-        cropped_annos = False
-        while cropped_annos is False:
-            crops = self.get_cropped_indices(input_img_w, input_img_h)
-            cropped_annos = self.crop_annotations(crops)
-        cropped_img = self.cropped_image(crops, input_img_w, input_img_h)
-        return {'img'  : torch.from_numpy(cropped_img),
-                'annot': torch.from_numpy(cropped_annos),
-                'info' : self.annot['info'],
-                'scale': 1}
+        crops = self.get_cropped_indices()
+        cropped_annos = self.crop_annotations(crops)
+        if cropped_annos is not False:
+            # print(self.img.shape)
+            cropped_img = self.cropped_image(crops)
+            # print(np.shape(cropped_img))
+            return {'img'  : torch.from_numpy(cropped_img.copy()),
+                    'annot': torch.from_numpy(cropped_annos.copy()),
+                    'info' : self.sample['info'].copy(),
+                    'scale': 1}
+        else:
+            # print('Cropped image contains no annotations.  Skipping...')
+            # print('FILE INFO: {}'.format(self.sample['info']))
+            return self.rescale()
     
-    def get_cropped_indices(self, input_img_w, input_img_h):
+    def get_cropped_indices(self):
         # Generate random initial point for crop
-        left_edge = random.randint(0, input_img_w - self.min_w)
-        top_edge = random.randint(0, input_img_h - self.min_h)
+        left_edge = random.randint(0, self.input_img_w - self.min_w)
+        top_edge = random.randint(0, self.input_img_h - self.min_h)
         right_edge = left_edge + self.min_w
         bottom_edge = top_edge + self.min_h
         return {'left_edge': left_edge, 'top_edge': top_edge, 'right_edge': right_edge, 'bottom_edge': bottom_edge}
     
-    def cropped_image(self, crops, input_img_w, input_img_h):
-        left_edge, top_edge, right_edge, bottom_edge = list(crops.values())
-        bottom_crop = abs(bottom_edge - input_img_h)
-        right_crop = abs(right_edge - input_img_w)
-        _crop = ((top_edge, bottom_crop), (left_edge, right_crop), (0, 0))
-        return skimage.util.crop(ar=self.img, crop_width=_crop, copy=True)
+    def cropped_image(self, crops):
+        bottom_crop = abs(crops['bottom_edge'] - self.input_img_h)
+        right_crop = abs(crops['right_edge'] - self.input_img_w)
+        _crop = ((crops['top_edge'], bottom_crop), (crops['left_edge'], right_crop), (0, 0))
+        return skimage.util.crop(ar=self.img, crop_width=_crop, copy=False)
     
     def crop_annotations(self, crops):
         left_edge, top_edge, right_edge, bottom_edge = list(crops.values())
@@ -238,34 +246,17 @@ class RandomCropOrScale(object):
         annots[annots[:, 2] > self.min_w, 2] = self.min_w
         annots[annots[:, 3] > self.min_h, 3] = self.min_h
         if annots.size == 0:
-            print('Cropped image contains no annotations.  Skipping...')
             return False
         else:
             return annots
     
     def rescale(self):
-        image = self.img.copy()
-        annots = self.annot.copy()
-        rows, cols, cns = image.shape
-        smallest_side = min(rows, cols)
-        # rescale the image so the smallest side is min_side
-        scale = self.min_side / smallest_side
-        # check if the largest side is now greater than max_side, which can happen
-        # when images have a large aspect ratio
-        largest_side = max(rows, cols)
-        if largest_side * scale > self.max_side:
-            scale = self.max_side / largest_side
-        # resize the image with the computed scale
-        image = skimage.transform.resize(image, (int(round(rows * scale)), int(round((cols * scale)))))
-        rows, cols, cns = image.shape
-        pad_w = 32 - rows % 32
-        pad_h = 32 - cols % 32
-        new_image = np.zeros((rows + pad_w, cols + pad_h, cns)).astype(np.float32)
-        new_image[:rows, :cols, :] = image.astype(np.float32)
-        annots[:, :4] *= scale
-        return {'img'  : torch.from_numpy(new_image),
-                'annot': torch.from_numpy(annots),
-                'info' : self.annot['info'],
+        image = skimage.transform.resize(self.img, (self.min_h, self.min_w)).astype(np.float32)
+        scale = self.min_side / self.input_img_h
+        self.annot[:, :4] *= scale
+        return {'img'  : torch.from_numpy(image.copy()),
+                'annot': torch.from_numpy(self.annot.copy()),
+                'info' : self.sample['info'].copy(),
                 'scale': scale}
 
 
@@ -323,16 +314,14 @@ class Augmenter(object):
 
 
 class Normalizer(object):
-    
     def __init__(self):
         self.mean = np.array([[[0.485, 0.456, 0.406]]])
         self.std = np.array([[[0.229, 0.224, 0.225]]])
     
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
-        
         return {'img': ((image.astype(np.float32) - self.mean) / self.std), 'annot': annots, 'info': sample['info']}
-
+    
 
 class UnNormalizer(object):
     def __init__(self, mean=None, std=None):

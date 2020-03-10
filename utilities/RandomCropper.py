@@ -50,7 +50,7 @@ class RandomCrop(GetSample):
                 cropped_img = self.cropped_image(crops, input_img_w, input_img_h)
                 return {'img': torch.from_numpy(cropped_img),
                         'annot': torch.from_numpy(cropped_annos),
-                        'info' : self.annot['info'],
+                        'info' : self.sample['info'],
                         'scale': 1}
             else:
                 continue
@@ -117,7 +117,7 @@ class RandomCrop(GetSample):
         annots[:, :4] *= scale
         return {'img': torch.from_numpy(new_image),
                 'annot': torch.from_numpy(annots),
-                'info' : self.annot['info'],
+                'info' : self.sample['info'],
                 'scale': scale}
 
 

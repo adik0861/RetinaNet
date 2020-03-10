@@ -1,13 +1,10 @@
-import shutil
-from time import time
-import numpy as np
 import os
 import re
-import sys
-from concurrent.futures.thread import ThreadPoolExecutor
+import shutil
+from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
-from contextlib import redirect_stdout
+from time import time
 
 import colors
 import pytz
@@ -15,14 +12,12 @@ import torch
 import torch.optim as optim
 from apex import amp, optimizers
 from colors import color
+from google.cloud import storage
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from tqdm import tqdm
 
 import model
 from dataloader import CocoDataset, collater, Resizer, AspectRatioBasedSampler, Augmenter, Normalizer, RandomCropOrScale
-
-from google.cloud import storage
 
 
 def cuda_check():
@@ -46,12 +41,10 @@ def flush_saved_files(save_dir='savefiles/checkpoints/'):
 
 
 class Initialization:
-    def __init__(self, epochs=1, batch_size=1, stride=2, workers=0, root_dir='/home/adityakunapuli/data',
-                 verbose=False):
+    def __init__(self, epochs=1, batch_size=1, workers=0, root_dir='/home/adityakunapuli/data', verbose=False):
         self.verbose = verbose
         self.batch_size = batch_size
         self.epochs = epochs
-        self.stride = stride
         self.workers = workers
         self.root_dir = root_dir
         # Prefix current_datetime to savefiles
@@ -108,9 +101,10 @@ class RetinaNet(Initialization):
         self.retinanet = model.resnet50(num_classes=12, pretrained=True).to(self.device)
         self.optimizer = optimizers.FusedAdam(params=self.retinanet.parameters(), lr=1e-5)
         self.amp = amp
-        self.retinanet, self.optimizer = self.amp.initialize(models=self.retinanet, optimizers=self.optimizer)
+        self.retinanet, self.optimizer = self.amp.initialize(models=self.retinanet, optimizers=self.optimizer,
+                                                             verbosity=self.verbose)
         self.load_checkpoint()
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, patience=3, verbose=self.verbose)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, patience=3, verbose=True)
     
     def initialize_dataloaders(self, **kwargs):
         self.get_training_dataloader()
@@ -310,28 +304,34 @@ class RetinaNet(Initialization):
         return classification_loss, regression_loss
     
     def train_epoch(self, epoch_num, dataloader=None):
-        print(f'Training Epoch {epoch_num}')
+        print(color(f'Training Epoch {epoch_num}', fg='green', style='bold+underline'))
         if dataloader is None:
             dataloader = self.training_dataloader
         # run_losses = list()
         # pbar = tqdm(total=self.image_count, file=sys.stdout, ncols=80, unit=' images')
-
-        with open(self.loss_log, 'a') as log_file:
-            for i, data in enumerate(dataloader, 1):
-                start_time = time()
+        
+        # with open(self.loss_log, 'a') as log_file:
+        for i, data in enumerate(dataloader, 1):
+            start_time = time()
+            try:
                 classification_loss, regression_loss = self.train_batch(data)
+            except Exception as error:
+                print(error)
+                del data
+                continue
+            else:
                 del data
                 _rate = self.batch_size / (time() - start_time)
                 ls = self.print_loss(epoch=epoch_num, i=i, cls=float(classification_loss), box=float(regression_loss),
                                      ttl=float(classification_loss + regression_loss), rate=_rate)
+                self.epoch_loss.append(classification_loss + regression_loss)
                 del regression_loss
                 del classification_loss
-                print(ls[1], file=log_file)
+                # print(ls[1], file=log_file)
                 if i < 25:
                     print(ls[0])
                 if i % 100 == 0:
                     msg = self.save_checkpoint(epoch=epoch_num, tmp=True)
                     print(msg)
                     print(ls[0])
-            self.epoch_loss.append(classification_loss + regression_loss)
-    
+                

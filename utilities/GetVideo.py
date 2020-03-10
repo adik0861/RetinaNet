@@ -2,7 +2,7 @@ import cv2
 from PIL import Image
 from colors import yellow
 from skimage import io, color
-
+from tqdm import tqdm
 from dataloader import *
 from train_epoch import *
 
