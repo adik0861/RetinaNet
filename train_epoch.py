@@ -129,8 +129,11 @@ class RetinaNet(Initialization):
         with redirect_stdout(None):
             self.training_dataset = CocoDataset(root_dir=self.root_dir, set_name=set_name, transform=None)
         [min_w, min_h] = self.get_min_size(self.training_dataset)
-        self.training_dataset.transform = transforms.Compose([Normalizer(), Augmenter(), Resizer()])
-        # RandomCropOrScale(min_w, min_h)])
+        self.training_dataset.transform = transforms.Compose([Normalizer(),
+                                                              Augmenter(),
+                                                              RandomCropOrScale(min_w, min_h),
+                                                              Resizer(),
+                                                              ])
         # training_dataset = self.get_dataset(set_name=set_name)
         sampler_train = AspectRatioBasedSampler(self.training_dataset, batch_size=self.batch_size, shuffle=True)
         self.training_dataloader = DataLoader(dataset=self.training_dataset, num_workers=self.workers,
@@ -334,4 +337,3 @@ class RetinaNet(Initialization):
                     msg = self.save_checkpoint(epoch=epoch_num, tmp=True)
                     print(msg)
                     print(ls[0])
-                
