@@ -131,7 +131,7 @@ class RetinaNet(Initialization):
         [min_w, min_h] = self.get_min_size(self.training_dataset)
         self.training_dataset.transform = transforms.Compose([Normalizer(),
                                                               Augmenter(),
-                                                              RandomCropOrScale(min_w, min_h),
+                                                              # RandomCropOrScale(min_w, min_h),
                                                               Resizer(),
                                                               ])
         # training_dataset = self.get_dataset(set_name=set_name)
