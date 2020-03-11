@@ -1,17 +1,14 @@
-import logging
-from pathlib import Path
-from time import time
-from functools import partial
-
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from train_epoch import RetinaNet
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from time import sleep
+
 import numpy as np
-from fixed_pycocotools import FixedCOCOeval as COCOeval
 import torch
 from tqdm import tqdm
-import threading
-from time import sleep
+
+from fixed_pycocotools import FixedCOCOeval as COCOeval
+from train_epoch import RetinaNet
 
 
 # self = RetinaNet()
@@ -34,7 +31,7 @@ class MultithreadedCOCOEval:
         self.indices_grouped = np.array_split(self.images_indices, os.cpu_count())
         self.pbar = tqdm(total=image_count, position=0, leave=True, desc='Multithreaded Validation')
         self.processing_complete = False
-
+    
     def evaluation(self):
         self.__multiprocessor__()
         self.__evaluation__()
@@ -42,7 +39,7 @@ class MultithreadedCOCOEval:
         # self.__evaluation__()
         # self.__waiter__()
         # self.__evaluation__()
-
+    
     def __evaluation__(self):
         if not len(self.results):
             return
@@ -56,11 +53,59 @@ class MultithreadedCOCOEval:
         self.model.train()
         self.pbar.close()
         return
-
+    
+    def __partial__(self, index):
+        # self.images_indices.pop(index)  # shrink this list with every workers call
+        data = self.dataset[index]
+        scale = data['scale']
+        img_data = data['img'].permute(2, 0, 1).to(self.dtype).to(self.device)
+        self.model.eval()
+        self.model.training = False
+        scores, labels, boxes = self.model(img_data.unsqueeze(dim=0))
+        scores = scores.cpu()
+        labels = labels.cpu()
+        boxes = boxes.cpu()
+        # correct boxes for image scale
+        boxes /= scale
+        if boxes.shape[0] > 0:
+            boxes[:, 2] -= boxes[:, 0]  # change to (x, y, w, h) (MS COCO standard)
+            boxes[:, 3] -= boxes[:, 1]
+            # compute predicted labels and scores
+            for box_id in range(boxes.shape[0]):
+                score = float(scores[box_id])
+                label = int(labels[box_id])
+                box = boxes[box_id, :]
+                # scores are sorted, so we can break
+                if score < self.threshold:
+                    break
+                # append detection for each positively labeled class
+                image_result = {'image_id'   : self.dataset.image_ids[index],
+                                'category_id': self.dataset.label_to_coco_label(label),
+                                'score'      : float(score),
+                                'bbox'       : box.tolist()}
+                # append detection to results
+                self.results.append(image_result)
+        # append image to list of processed images
+        self.image_ids.append(self.dataset.image_ids[index])
+        self.pbar.update(n=1)
+    
+    def __multiprocessor__(self):
+        cores = os.cpu_count()
+        with ThreadPoolExecutor(max_workers=cores * 2) as executor:
+            executor.map(self.__partial__, self.images_indices, timeout=30)
+    
+    @staticmethod
+    def get_dtype(_model):
+        model_weights_dtype = [v.dtype for k, v in _model.state_dict().items() if 'weight' in k]
+        model_weights_dtype = set(model_weights_dtype)
+        if len(model_weights_dtype) != 1:
+            return Exception('Too many dtypes returned from model weights.')
+        return model_weights_dtype.pop()
+    
     def __waiter__(self):
         while self.images_indices:
             sleep(5)
-
+    
     def __receptionist__(self):
         jobs = []
         for cpu_idx in range(0, os.cpu_count()):
@@ -70,7 +115,7 @@ class MultithreadedCOCOEval:
             j.start()
         for j in jobs:
             j.join(5)
-
+    
     def __worker__(self, index_list):
         with torch.no_grad():
             for index in index_list:
@@ -108,54 +153,6 @@ class MultithreadedCOCOEval:
                 self.image_ids.append(self.dataset.image_ids[index])
                 self.pbar.update(n=1)
 
-    def __partial__(self, index):
-        # self.images_indices.pop(index)  # shrink this list with every workers call
-        data = self.dataset[index]
-        scale = data['scale']
-        img_data = data['img'].permute(2, 0, 1).to(self.dtype).to(self.device)
-        self.model.eval()
-        self.model.training = False
-        scores, labels, boxes = self.model(img_data.unsqueeze(dim=0))
-        scores = scores.cpu()
-        labels = labels.cpu()
-        boxes = boxes.cpu()
-        # correct boxes for image scale
-        boxes /= scale
-        if boxes.shape[0] > 0:
-            boxes[:, 2] -= boxes[:, 0]  # change to (x, y, w, h) (MS COCO standard)
-            boxes[:, 3] -= boxes[:, 1]
-            # compute predicted labels and scores
-            for box_id in range(boxes.shape[0]):
-                score = float(scores[box_id])
-                label = int(labels[box_id])
-                box = boxes[box_id, :]
-                # scores are sorted, so we can break
-                if score < self.threshold:
-                    break
-                # append detection for each positively labeled class
-                image_result = {'image_id'   : self.dataset.image_ids[index],
-                                'category_id': self.dataset.label_to_coco_label(label),
-                                'score'      : float(score),
-                                'bbox'       : box.tolist()}
-                # append detection to results
-                self.results.append(image_result)
-        # append image to list of processed images
-        self.image_ids.append(self.dataset.image_ids[index])
-        self.pbar.update(n=1)
-
-    def __multiprocessor__(self):
-        cores = os.cpu_count()
-        with ThreadPoolExecutor(max_workers=cores*2) as executor:
-            executor.map(self.__partial__, self.images_indices, timeout=30)
-
-    @staticmethod
-    def get_dtype(_model):
-        model_weights_dtype = [v.dtype for k, v in _model.state_dict().items() if 'weight' in k]
-        model_weights_dtype = set(model_weights_dtype)
-        if len(model_weights_dtype) != 1:
-            return Exception('Too many dtypes returned from model weights.')
-        return model_weights_dtype.pop()
-
 
 if __name__ == '__main__':
     net = RetinaNet()
@@ -165,7 +162,6 @@ if __name__ == '__main__':
     # self.__receptionist__()
     self.__multiprocessor__()
     self.__evaluation__()
-
 
 """
 Found a checkpoint file at: savefiles/checkpoints/1583512758_retinanet_4.pt, the checkpoint made on Friday, 06. March 2020 08:39AM
@@ -196,8 +192,6 @@ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.008
  Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.127
 Multithreaded Validation: 100%|████████████▉| 2845/2846 [21:18<00:00,  2.22it/s]
 """
-
-
 
 #
 # class MultiThreadedTraining(RetinaNet):

@@ -59,7 +59,8 @@ class CocoDataset(Dataset):
         info = self.load_image_info(idx)
         sample = {'img': img, 'annot': annot, 'info': info}
         if self.visualization is True:
-            print(info['file_name'])
+            pass
+            # print(info['file_name'])
         if self.transform:
             sample = self.transform(sample)
         return sample

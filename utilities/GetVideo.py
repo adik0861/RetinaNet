@@ -1,8 +1,11 @@
+import sys
+
 import cv2
 from PIL import Image
 from colors import yellow
 from skimage import io, color
 from tqdm import tqdm
+
 from dataloader import *
 from train_epoch import *
 
@@ -10,6 +13,8 @@ from train_epoch import *
 class GetVideo(RetinaNet):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        if 'utilities' in os.getcwd():
+            os.chdir('..')
         self.initialize_training()
         self.images_dir = self.get_img_dir()
         self.unnormalize = UnNormalizer()
@@ -44,7 +49,8 @@ class GetVideo(RetinaNet):
                     if predicted_idx in self.validation_dataset.labels:
                         label_name = self.validation_dataset.labels[predicted_idx]
                         self.draw_caption(img, (x1, y1, x2, y2), label_name)
-                        cv2.rectangle(img, (x1, y1), (x2, y2), color=(0, 0, 255), thickness=2)
+                        # cv2.rectangle(img, (x1, y1), (x2, y2), color=(0, 0, 255), thickness=2)
+                
                 del classification
                 del transformed_anchors
             self.frames.append(img)
@@ -52,6 +58,16 @@ class GetVideo(RetinaNet):
             pbar.update()
         pbar.close()
         self.video_path = os.path.join(self.root_dir, '.'.join([sub_dir, 'avi']))
+    
+    @staticmethod
+    def draw_caption(image, box, caption):
+        b = np.array(box).astype(int)
+        caption = caption.upper()
+        cv2.putText(img=image, text=caption, org=(b[0], b[1] - 10), fontFace=cv2.FONT_HERSHEY_PLAIN, fontScale=1,
+                    color=(0, 0, 0), thickness=2, lineType=cv2.LINE_AA)
+        cv2.putText(img=image, text=caption, org=(b[0], b[1] - 10), fontFace=cv2.FONT_HERSHEY_PLAIN, fontScale=1,
+                    color=(255, 255, 255), thickness=1, lineType=cv2.LINE_AA)
+        cv2.rectangle(img=image, pt1=(b[0], b[1]), pt2=(b[2], b[3]), color=(0, 0, 255), thickness=1)
     
     @staticmethod
     def output_to_file(idx, image_data):
@@ -79,12 +95,6 @@ class GetVideo(RetinaNet):
         images_dir = Path.cwd().joinpath('savefiles/images')
         images_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
         return images_dir
-    
-    @staticmethod
-    def draw_caption(image, box, caption):
-        b = np.array(box).astype(int)
-        cv2.putText(image, caption, (b[0], b[1] - 10), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
-        cv2.putText(image, caption, (b[0], b[1] - 10), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
     
     def img_to_tensor(self, image_path):
         img = skimage.io.imread(image_path)
@@ -118,7 +128,7 @@ if __name__ == '__main__':
     directories = [x for x in os.listdir('/home/adityakunapuli/data/val/images')
                    if not x.endswith('.json') and not x.endswith('.avi')]
     for subdir in directories:
-        if 'uav0000086_00000_v' in subdir:
+        if 'uav0000137_00458_v' in subdir:
             self.validation(sub_dir=subdir)
             self.make_movie()
             break

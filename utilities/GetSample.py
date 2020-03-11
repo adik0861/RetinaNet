@@ -16,6 +16,11 @@ def unnormalize(tensor):
     return tensor
 
 
+transforms = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor(),
+                                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                      std=[0.229, 0.224, 0.225])])
+
+
 class GetSample:
     def __init__(self, _root_dir='/home/adityakunapuli/data'):
         self.dataset = CocoDataset(root_dir=_root_dir, set_name='val',
@@ -23,7 +28,7 @@ class GetSample:
                                    transform=transforms.Compose([Normalizer(), Resizer()]),
                                    sort=False)
         self.sample = self.get_sample()
-
+    
     @staticmethod
     def visualize_base_image(tensor):
         im = tensor
@@ -75,4 +80,4 @@ class GetSample:
         image = skimage.util.crop(ar=sample['img'], crop_width=_crop, copy=True)
         crop = {'left_edge': left_edge, 'top_edge': top_edge, 'right_edge': right_edge, 'bottom_edge': bottom_edge}
         return {'img': torch.from_numpy(image), 'crop': crop}
-
+    
