@@ -2,7 +2,7 @@
 
 import random
 from pathlib import Path
-import torchvision.transforms.functional as F
+
 import numpy as np
 import skimage
 import skimage.color
@@ -16,7 +16,8 @@ from torch.utils.data.sampler import Sampler
 
 
 class CocoDataset(Dataset):
-    def __init__(self, root_dir, set_name='train', transform=None, sub_dir=None, categories=None, sort=False):
+    def __init__(self, root_dir, set_name='train', transform=None, sub_dir=None, categories=None, sort=False,
+                 custom_order=None):
         self.root_dir = root_dir
         self.set_name = set_name
         self.transform = transform
@@ -30,9 +31,14 @@ class CocoDataset(Dataset):
         else:
             self.json_path = self.root_dir.joinpath(file_name)
         self.coco = COCO(self.json_path)
-        self.image_ids = self.coco.getImgIds()
+        
+        if custom_order is None:
+            self.image_ids = self.coco.getImgIds()
+        else:
+            self.image_ids = self.coco.getImgIds(custom_order)
         if sort is True:
             self.image_ids.sort()  # careful sorting as it could possibly return a none type
+            
         self.labels, self.classes, self.coco_labels, self.coco_labels_inverse = dict(), dict(), dict(), dict()
         self.load_classes()
     
@@ -322,7 +328,7 @@ class Normalizer(object):
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
         return {'img': ((image.astype(np.float32) - self.mean) / self.std), 'annot': annots, 'info': sample['info']}
-    
+
 
 class UnNormalizer(object):
     def __init__(self, mean=None, std=None):
@@ -368,7 +374,7 @@ class AspectRatioBasedSampler(Sampler):
             return len(self.data_source) // self.batch_size
         else:
             return (len(self.data_source) + self.batch_size - 1) // self.batch_size
-
+    
     # a = {k: v for k, v in self.data_source.co.catToImgs.items() if k not in (0, 6, 7)}
     # b = list()
     # for x in a.values():

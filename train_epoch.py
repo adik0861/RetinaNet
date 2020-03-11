@@ -1,44 +1,18 @@
-import os
-import re
-import shutil
+# noinspection PyPackageRequirements
 from contextlib import redirect_stdout
 from datetime import datetime
-from pathlib import Path
-from time import time
 
-import colors
 import numpy as np
 import pytz
-import torch
 import torch.optim as optim
 from apex import amp, optimizers
-from colors import color
-from google.cloud import storage
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-import model
+import model as Model
+# from model import *
 from dataloader import CocoDataset, collater, Resizer, AspectRatioBasedSampler, Augmenter, Normalizer, RandomCropOrScale
-
-
-def cuda_check():
-    if torch.cuda.is_available():
-        print(colors.black('SUCCESS: CUDA DETECTED!', style='bold', fg='green'))
-        return torch.device('cuda')
-    else:
-        print(colors.black('WARNING: CUDA NOT DETECTED!', style='bold', fg='red'))
-        return torch.device('cpus')
-
-
-def flush_saved_files(save_dir='savefiles/checkpoints/'):
-    if not os.path.exists(save_dir):
-        return None
-    file_cnt = len(os.listdir(save_dir))
-    if file_cnt > 0:
-        print(colors.color(f'{file_cnt} files detected', style='bold', fg='red'))
-        for file in os.listdir(save_dir):
-            print(colors.red(f'\tDeleted {file}'))
-            os.remove(save_dir + file)
+from utilities.HelperFunctions import *
 
 
 class Initialization:
@@ -68,18 +42,31 @@ class Initialization:
         self.training_dataloader, self.training_dataset = [None, None]
         self.validation_dataloader, self.validation_dataset = [None, None]
         # This only here for validation against datasets too small to contain all the necessary labels
-        self.categories = [{'id': 0, 'name': 'ignored', 'supercategory': 'other'},
-                           {'id': 1, 'name': 'pedestrian', 'supercategory': 'person'},
-                           {'id': 2, 'name': 'people', 'supercategory': 'person'},
-                           {'id': 3, 'name': 'bicycle', 'supercategory': 'vehicle'},
-                           {'id': 4, 'name': 'car', 'supercategory': 'vehicle'},
-                           {'id': 5, 'name': 'van', 'supercategory': 'vehicle'},
-                           {'id': 6, 'name': 'truck', 'supercategory': 'vehicle'},
-                           {'id': 7, 'name': 'tricycle', 'supercategory': 'vehicle'},
-                           {'id': 8, 'name': 'awning-tricycle', 'supercategory': 'vehicle'},
-                           {'id': 9, 'name': 'bus', 'supercategory': 'vehicle'},
-                           {'id': 10, 'name': 'motor', 'supercategory': 'vehicle'},
-                           {'id': 11, 'name': 'others', 'supercategory': 'other'}]
+        # _categories = [{'id': 0, 'name': 'ignored', 'supercategory': 'other', 'supercategory_id': 0},
+        #                {'id': 1, 'name': 'pedestrian', 'supercategory': 'person', 'supercategory_id': 1},
+        #                {'id': 2, 'name': 'people', 'supercategory': 'person', 'supercategory_id': 1},
+        #                {'id': 3, 'name': 'bicycle', 'supercategory': 'vehicle', 'supercategory_id': 1},
+        #                {'id': 4, 'name': 'car', 'supercategory': 'vehicle', 'supercategory_id': 2},
+        #                {'id': 5, 'name': 'van', 'supercategory': 'vehicle', 'supercategory_id': 2},
+        #                {'id': 6, 'name': 'truck', 'supercategory': 'vehicle', 'supercategory_id': 2},
+        #                {'id': 7, 'name': 'tricycle', 'supercategory': 'vehicle', 'supercategory_id': 1},
+        #                {'id': 8, 'name': 'awning-tricycle', 'supercategory': 'vehicle', 'supercategory_id': 2},
+        #                {'id': 9, 'name': 'bus', 'supercategory': 'vehicle', 'supercategory_id': 2},
+        #                {'id': 10, 'name': 'motor', 'supercategory': 'vehicle', 'supercategory_id': 2},
+        #                {'id': 11, 'name': 'others', 'supercategory': 'other', 'supercategory_id': 0}]
+        
+        self.categories = [{'id': 0, 'name': 'others', 'supercategory': 'others', 'supercategory_id': 0},
+                           {'id': 1, 'name': 'person', 'supercategory': 'person', 'supercategory_id': 1},
+                           {'id': 1, 'name': 'person', 'supercategory': 'person', 'supercategory_id': 1},
+                           {'id': 1, 'name': 'vehicle', 'supercategory': 'vehicle', 'supercategory_id': 1},
+                           {'id': 2, 'name': 'vehicle', 'supercategory': 'vehicle', 'supercategory_id': 2},
+                           {'id': 2, 'name': 'vehicle', 'supercategory': 'vehicle', 'supercategory_id': 2},
+                           {'id': 2, 'name': 'vehicle', 'supercategory': 'vehicle', 'supercategory_id': 2},
+                           {'id': 1, 'name': 'vehicle', 'supercategory': 'vehicle', 'supercategory_id': 1},
+                           {'id': 2, 'name': 'vehicle', 'supercategory': 'vehicle', 'supercategory_id': 2},
+                           {'id': 2, 'name': 'vehicle', 'supercategory': 'vehicle', 'supercategory_id': 2},
+                           {'id': 2, 'name': 'vehicle', 'supercategory': 'vehicle', 'supercategory_id': 2},
+                           {'id': 0, 'name': 'others', 'supercategory': 'others', 'supercategory_id': 0}]
     
     @staticmethod
     def initialize_subdirectories():
@@ -99,13 +86,20 @@ class RetinaNet(Initialization):
     # Initialization
     # ------------------------------------
     def initialize_training(self):
-        self.retinanet = model.resnet50(num_classes=12, pretrained=True).to(self.device)
-        self.optimizer = optimizers.FusedAdam(params=self.retinanet.parameters(), lr=1e-5)
+        self.retinanet = Model.resnet50(num_classes=12, pretrained=True).to(self.device)
+        
+        self.optimizer = optimizers.FusedSGD(params=self.retinanet.parameters(), lr=0.01, momentum=0.9,
+                                             weight_decay=0.0001)
+        # self.optimizer = optimizers.FusedAdam(params=self.retinanet.parameters(), lr=1e-1)
         self.amp = amp
-        self.retinanet, self.optimizer = self.amp.initialize(models=self.retinanet, optimizers=self.optimizer,
+        self.retinanet, self.optimizer = self.amp.initialize(models=self.retinanet,
+                                                             optimizers=self.optimizer,
+                                                             opt_level='O2',
                                                              verbosity=self.verbose)
         self.load_checkpoint()
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, patience=3, verbose=True)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer,
+                                                              patience=3,
+                                                              verbose=True)
     
     def initialize_dataloaders(self, **kwargs):
         self.get_training_dataloader()
@@ -127,6 +121,7 @@ class RetinaNet(Initialization):
         return training_dataset
     
     def get_custom_data(self):
+        self.training_dataset = CocoDataset(root_dir=self.root_dir, set_name='train', custom_order=None)
         image_list = set()
         for image in self.training_dataset.coco.imgToAnns.values():
             a = [x['category_id'] for x in image]
@@ -138,17 +133,17 @@ class RetinaNet(Initialization):
     
     def get_training_dataloader(self, set_name='train'):  # this can be used for entire sets
         with redirect_stdout(None):
-            self.training_dataset = CocoDataset(root_dir=self.root_dir, set_name=set_name, transform=None)
-        custom_dataset = self.get_custom_data()
-        [min_w, min_h] = self.get_min_size(self.training_dataset)
+            # custom_dataset = self.get_custom_data()
+            self.training_dataset = CocoDataset(root_dir=self.root_dir, set_name=set_name, transform=None,
+                                                custom_order=None)
+        # [min_w, min_h] = self.get_min_size(self.training_dataset)
         self.training_dataset.transform = transforms.Compose([Normalizer(),
                                                               Augmenter(),
                                                               # RandomCropOrScale(min_w, min_h),
                                                               Resizer(),
                                                               ])
         # training_dataset = self.get_dataset(set_name=set_name)
-        sampler_train = AspectRatioBasedSampler(self.training_dataset, batch_size=self.batch_size, shuffle=True,
-                                                custom_order=custom_dataset)
+        sampler_train = AspectRatioBasedSampler(self.training_dataset, batch_size=self.batch_size, shuffle=True)
         self.training_dataloader = DataLoader(dataset=self.training_dataset, num_workers=self.workers,
                                               collate_fn=collater, batch_sampler=sampler_train, pin_memory=True)
         self.print_data_statistics(data_loader=self.training_dataloader, set_type='Training')
@@ -190,7 +185,7 @@ class RetinaNet(Initialization):
             except Exception as error:
                 raise error
             else:
-                self.epoch += 1
+                self.epoch = 1
                 print(color(f'Starting off at epoch = {self.epoch}'))
         else:
             print(color('No checkpoints found, starting from scratch', fg='yellow'))
@@ -220,8 +215,8 @@ class RetinaNet(Initialization):
         last_checkpoint = self.checkpoint_dir.joinpath('last_checkpoint')  # noting the final checkpoint
         last_checkpoint.write_text(checkpoint_path)
         if os.path.exists(checkpoint_path):
-            self.save_checkpoint_storage(checkpoint_path)
-            return color(f'Succesfully saved checkpoint to:\t{checkpoint_path}', fg='green')
+            # self.save_checkpoint_storage(checkpoint_path)
+            print(color(f'Succesfully saved checkpoint to:\t{checkpoint_path}', fg='green'))
         else:
             raise Exception(color(f'Unable to save checkpoint at:\n{checkpoint_path}', fg='red'))
     
@@ -258,7 +253,7 @@ class RetinaNet(Initialization):
     
     @staticmethod
     def print_data_statistics(data_loader, set_type):
-        print(colors.yellow('{} images = {:,}'.format(set_type, len(data_loader))))
+        print(colors.yellow('{} images = {:,}'.format(set_type, len(data_loader.dataset))))
         print(colors.yellow('{} annotations = {:,}'.format(set_type, len(data_loader.dataset.coco.anns))))
     
     def print_batch_statistics(self):
@@ -310,14 +305,13 @@ class RetinaNet(Initialization):
         img_data = data['img'].to(self.device).to(torch.float32)
         img_anno = data['annot'].to(self.device).to(torch.float32)
         classification_loss, regression_loss = self.retinanet([img_data, img_anno])
-        del img_data
-        del img_anno
         with self.amp.scale_loss(classification_loss + regression_loss, self.optimizer) as scaled_loss:
             scaled_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.amp.master_params(self.optimizer), 0.1)
         self.optimizer.step()
-        del scaled_loss
-        return classification_loss, regression_loss
+        focal_loss, box_loss = classification_loss.item(), regression_loss.item()
+        del scaled_loss, img_data, img_anno, classification_loss, regression_loss
+        return focal_loss, box_loss
     
     def train_epoch(self, epoch_num, dataloader=None):
         print(color(f'Training Epoch {epoch_num}', fg='green', style='bold+underline'))
@@ -326,27 +320,24 @@ class RetinaNet(Initialization):
         # run_losses = list()
         # pbar = tqdm(total=self.image_count, file=sys.stdout, ncols=80, unit=' images')
         
-        # with open(self.loss_log, 'a') as log_file:
-        for i, data in enumerate(dataloader, 1):
-            start_time = time()
-            try:
-                classification_loss, regression_loss = self.train_batch(data)
-            except Exception as error:
-                print(error)
-                del data
-                continue
-            else:
-                del data
-                _rate = self.batch_size / (time() - start_time)
-                ls = self.print_loss(epoch=epoch_num, i=i, cls=float(classification_loss), box=float(regression_loss),
-                                     ttl=float(classification_loss + regression_loss), rate=_rate)
-                self.epoch_loss.append(classification_loss + regression_loss)
-                del regression_loss
-                del classification_loss
-                # print(ls[1], file=log_file)
-                if i < 25:
-                    print(ls[0])
-                if i % 100 == 0:
-                    msg = self.save_checkpoint(epoch=epoch_num, tmp=True)
-                    print(msg)
-                    print(ls[0])
+        with open(self.loss_log, 'a') as log_file:
+            for i, data in enumerate(dataloader, 1):
+                start_time = time()
+                try:
+                    classification_loss, regression_loss = self.train_batch(data)
+                except Exception as error:
+                    print(error)
+                    del data
+                    continue
+                else:
+                    _rate = self.batch_size / (time() - start_time)
+                    ls = self.print_loss(epoch=epoch_num, i=i, cls=float(classification_loss),
+                                         box=float(regression_loss),
+                                         ttl=float(classification_loss + regression_loss), rate=_rate)
+                    self.epoch_loss.append(classification_loss + regression_loss)
+                    del regression_loss, classification_loss, data
+                    print(ls[1], file=log_file)
+                    if i < 25 or (i < 100 and i % 5 == 0) or i % 25 == 0:
+                        print(ls[0])
+                    if i % 100 == 0:
+                        self.save_checkpoint(epoch=epoch_num, tmp=True)

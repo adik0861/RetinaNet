@@ -14,7 +14,7 @@ class GetVideo(RetinaNet):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if 'utilities' in os.getcwd():
-            os.chdir('..')
+            os.chdir('../..')
         self.initialize_training()
         self.images_dir = self.get_img_dir()
         self.unnormalize = UnNormalizer()

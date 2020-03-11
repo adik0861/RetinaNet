@@ -264,7 +264,7 @@ class ResNet(nn.Module):
             classification = classification[:, scores_over_thresh, :]
             transformed_anchors = transformed_anchors[:, scores_over_thresh, :]
             scores = scores[:, scores_over_thresh, :]
-            anchors_nms_idx = nms(transformed_anchors[0, :, :], scores[0, :, 0], 0.3)
+            anchors_nms_idx = nms(transformed_anchors[0, :, :], scores[0, :, 0], 0.5)
             nms_scores, nms_class = classification[0, anchors_nms_idx, :].max(dim=1)
             return [nms_scores, nms_class, transformed_anchors[0, anchors_nms_idx, :]]
 

@@ -1,11 +1,11 @@
-from colors import color, green, yellow, red
-import os
 import json
-import pandas as pd
+import os
 from pathlib import Path
-from tqdm import tqdm
-from PIL import Image
 
+import pandas as pd
+from PIL import Image
+from colors import green
+from tqdm import tqdm
 
 # class MergeVisDroneCSVs:
 #     def __init__(self, **kwargs):
@@ -30,6 +30,58 @@ from PIL import Image
 #         df.to_csv(save_path, index=False)
 #         return save_path
 
+_categories = [{'id': 0, 'name': 'ignored', 'supercategory': 'others', 'supercategory_id': 0},
+               {'id': 1, 'name': 'pedestrian', 'supercategory': 'person', 'supercategory_id': 1},
+               {'id': 2, 'name': 'people', 'supercategory': 'person', 'supercategory_id': 1},
+               {'id': 3, 'name': 'bicycle', 'supercategory': 'vehicle', 'supercategory_id': 1},
+               {'id': 4, 'name': 'car', 'supercategory': 'vehicle', 'supercategory_id': 2},
+               {'id': 5, 'name': 'van', 'supercategory': 'vehicle', 'supercategory_id': 2},
+               {'id': 6, 'name': 'truck', 'supercategory': 'vehicle', 'supercategory_id': 2},
+               {'id': 7, 'name': 'tricycle', 'supercategory': 'vehicle', 'supercategory_id': 1},
+               {'id': 8, 'name': 'awning-tricycle', 'supercategory': 'vehicle', 'supercategory_id': 2},
+               {'id': 9, 'name': 'bus', 'supercategory': 'vehicle', 'supercategory_id': 2},
+               {'id': 10, 'name': 'motor', 'supercategory': 'vehicle', 'supercategory_id': 2},
+               {'id': 11, 'name': 'others', 'supercategory': 'others', 'supercategory_id': 0}]
+# _map = {x['name']: x['supercategory'] for x in categories}
+
+
+id_to_superid = {}
+for x in _categories:
+    id_to_superid[x['id']] = x['supercategory_id']
+
+cat_to_supercat = {}
+for x in _categories:
+    cat_to_supercat[x['name']] = x['supercategory']
+
+for x in _categories:
+    x['name'] = cat_to_supercat[x['name']]
+    x['id'] = id_to_superid[x['id']]
+
+
+#
+# categories = [{'id': 0, 'name': 'ignored', 'supercategory': 'other'},
+#               {'id': 1, 'name': 'pedestrian', 'supercategory': 'person'},
+#               {'id': 2, 'name': 'people', 'supercategory': 'person'},
+#               {'id': 3, 'name': 'bicycle', 'supercategory': 'vehicle'},
+#               {'id': 4, 'name': 'car', 'supercategory': 'vehicle'},
+#               {'id': 5, 'name': 'van', 'supercategory': 'vehicle'},
+#               {'id': 6, 'name': 'truck', 'supercategory': 'vehicle'},
+#               {'id': 7, 'name': 'tricycle', 'supercategory': 'vehicle'},
+#               {'id': 8, 'name': 'awning-tricycle', 'supercategory': 'vehicle'},
+#               {'id': 9, 'name': 'bus', 'supercategory': 'vehicle'},
+#               {'id': 10, 'name': 'motor', 'supercategory': 'vehicle'},
+#               {'id': 11, 'name': 'others', 'supercategory': 'other'}]
+
+#
+# cat_to_supercat = {'ignored'        : 'other', 'pedestrian': 'person', 'people': 'person', 'bicycle': 'vehicle',
+#                    'car'            : 'vehicle', 'van': 'vehicle', 'truck': 'vehicle', 'tricycle': 'vehicle',
+#                    'awning-tricycle': 'vehicle', 'bus': 'vehicle', 'motor': 'vehicle', 'others': 'other'}
+# id_to_supercat = {0: 'other', 1: 'person', 2: 'person', 3: 'vehicle', 4: 'vehicle', 5: 'vehicle', 6: 'vehicle',
+#                   7: 'vehicle', 8: 'vehicle', 9: 'vehicle', 10: 'vehicle', 11: 'other'}
+#
+# id_to_supercat = {0: 'other', 1: 'person', 2: 'person', 3: 'vehicle', 4: 'vehicle', 5: 'vehicle', 6: 'vehicle',
+#                   7: 'vehicle', 8: 'vehicle', 9: 'vehicle', 10: 'vehicle', 11: 'other'}
+
 
 class CSVtoJSON:
     def __init__(self, csv_list, dataset, Head=None, image_dir=None, inference=False):
@@ -37,7 +89,7 @@ class CSVtoJSON:
         self.dataset = dataset
         self.head = Head
         self.image_dir = image_dir  # .format(dataset=Dataset)
-
+        
         classes = [['person', 1, 'pedestrian'], ['person', 2, 'people'],
                    ['vehicle', 3, 'bicycle'], ['vehicle', 4, 'car'],
                    ['vehicle', 5, 'van'], ['vehicle', 6, 'truck'],
@@ -45,19 +97,19 @@ class CSVtoJSON:
                    ['vehicle', 9, 'bus'], ['vehicle', 10, 'motor'],
                    ['other', 11, 'others'], ['other', 0, 'ignored']]
         self.classes = pd.DataFrame(classes, columns=['supercategory', 'category_id', 'category_name'])
-
+        
         self.csv_header = ['file_name', 'target_id', 'x', 'y', 'w', 'h',
                            'score', 'category_id', 'truncation', 'occlusion']
         self.dtypes = {'file_name': str, 'target_id': int, 'x': int, 'y': int, 'w': int, 'h': int,
                        'score'    : int, 'category_id': int, 'truncation': int}
         self.inference = inference
-
+    
     def coco(self):
         _df = self.csv_to_df()
         _dc = self.df_to_dict(Df=_df)
         _js = self.dict_to_json(Dict=_dc, Dataset=self.dataset)
         return _js
-
+    
     def csv_to_df(self):
         df_list = list()
         for csv_path in tqdm(self.csv_list, desc=f'[{self.dataset}] csv → df'):
@@ -87,7 +139,7 @@ class CSVtoJSON:
         df_concat['id'] = 0
         # df_concat['id'] = list(df_concat.index.astype(str).to_list())
         return df_concat
-
+    
     def df_to_dict(self, Df):
         images_list, annotations_list, categories_list = list(), list(), list()
         anno_idx = 1
@@ -97,7 +149,7 @@ class CSVtoJSON:
             _dict = self.dict_contructor(row)
             images_list.append(_dict['images'])
             categories_list.append(_dict['categories'])
-
+            
             _dict['annotations']['id'] = anno_idx
             anno_idx += 1
             annotations_list.append(_dict['annotations'])
@@ -105,7 +157,7 @@ class CSVtoJSON:
         for key in ['images', 'categories']:
             data_dict[key] = self.get_unique(Dict=data_dict[key])
         return data_dict
-
+    
     def dict_to_json(self, Dict, Dataset, SaveTo=None):
         if SaveTo is None:
             _json_path = os.path.join(self.image_dir, Dataset + '.json')
@@ -113,23 +165,24 @@ class CSVtoJSON:
             _json_path = SaveTo
         with open(_json_path, 'w', encoding='utf-8') as f:
             json.dump(Dict, f, ensure_ascii=False, indent=2)
+        print(f'JSON saved to:{_json_path}\n')
         return _json_path
-
+    
     @staticmethod
     def get_unique(Dict):
         return list(map(dict, set(tuple(sorted(d.items())) for d in Dict)))
-
+    
     @staticmethod
     def get_image_dir(csv_path):
         csv_path = str(csv_path)
         csv_path = csv_path.replace('annotations', 'images')
         return csv_path.replace('.txt', '')
-
+    
     @staticmethod
     def get_img_size(image_path):
         im = Image.open(image_path)
         return im.size  # w x h
-
+    
     @staticmethod
     def dict_contructor(Row):
         return {'images'     : {'id'       : int(Row.image_id),
@@ -138,14 +191,18 @@ class CSVtoJSON:
                                 'file_name': Row.file_name},
                 'annotations': {'id'         : 0,
                                 'image_id'   : Row.image_id,
-                                'category_id': Row.category_id,
+                                'category_id': id_to_superid[Row.category_id],
                                 'bbox'       : [Row.x, Row.y, Row.w, Row.h],
                                 'iscrowd'    : 0,
                                 'area'       : Row.w * Row.h},
                 'categories' : {'supercategory': Row.supercategory,
-                                'id'           : Row.category_id,
-                                'name'         : Row.category_name}}
-
+                                'id'           : id_to_superid[Row.category_id],
+                                'name'         : cat_to_supercat[Row.category_name]
+                                # 'id'           : Row.category_id,
+                                # 'name'         : Row.category_name}
+                                }
+                }
+    
     @staticmethod
     def valid_bbox(row):
         if row.w <= 3:
@@ -163,6 +220,4 @@ if __name__ == '__main__':
         csv_dir = f'/home/adityakunapuli/data/{dataset}/annotations'
         csv_list = [Path(csv_dir).joinpath(x) for x in os.listdir(csv_dir) if x.endswith('txt') or x.endswith('csv')]
         self = CSVtoJSON(csv_list=csv_list, image_dir=image_dir, inference=False, dataset=dataset)
-        df = self.csv_to_df()
-        # json_path = self.coco()
-        # print(f'JSON saved to:{json_path}\n')
+        json_path = self.coco()
