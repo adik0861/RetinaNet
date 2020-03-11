@@ -156,25 +156,13 @@ class CSVtoJSON:
 
 
 if __name__ == '__main__':
-    # print(green('\nStarting validation subdirectory JSON conversion.'))
-    # for dataset in ['val']:
-    #     image_dir = f'/home/adityakunapuli/data/{dataset}/images'
-    #     csv_dir = f'/home/adityakunapuli/data/{dataset}/annotations'
-    #     val_list = [Path(csv_dir).joinpath(x) for x in os.listdir(csv_dir)]
-    #     for sub_dir in val_list:
-    #         print(yellow(f'{sub_dir.stem}'))
-    #         save_to = str(sub_dir.parent.joinpath(sub_dir.stem, 'val.json')).replace('annotations', 'images')
-    #         self = CSVtoJSON(csv_list=[sub_dir], image_dir=image_dir, inference=False, dataset=dataset)
-    #         dataframe = self.csv_to_df()
-    #         dictionary = self.df_to_dict(Df=dataframe)
-    #         json_path = self.dict_to_json(Dict=dictionary, Dataset=self.dataset, SaveTo=save_to)
-
-    print(green('\nStarting training and validation JSON conversion.'))
     i = 1
     for dataset in ['train']:
+        print(green(f'\nStarting JSON conversion for {dataset}'))
         image_dir = f'/home/adityakunapuli/data/{dataset}/images'
         csv_dir = f'/home/adityakunapuli/data/{dataset}/annotations'
         csv_list = [Path(csv_dir).joinpath(x) for x in os.listdir(csv_dir) if x.endswith('txt') or x.endswith('csv')]
         self = CSVtoJSON(csv_list=csv_list, image_dir=image_dir, inference=False, dataset=dataset)
+        df = self.csv_to_df()
         # json_path = self.coco()
         # print(f'JSON saved to:{json_path}\n')

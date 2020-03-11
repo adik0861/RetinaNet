@@ -7,6 +7,7 @@ from pathlib import Path
 from time import time
 
 import colors
+import numpy as np
 import pytz
 import torch
 import torch.optim as optim
@@ -125,9 +126,20 @@ class RetinaNet(Initialization):
         training_dataset.transform = _transforms
         return training_dataset
     
+    def get_custom_data(self):
+        image_list = set()
+        for image in self.training_dataset.coco.imgToAnns.values():
+            a = [x['category_id'] for x in image]
+            _count = np.unique(a, return_counts=True)
+            _counts = dict(zip(_count[0], _count[1]))
+            if _counts.get(1, 0) > 10:
+                image_list.add(image[0]['image_id'])
+        return list(image_list)
+    
     def get_training_dataloader(self, set_name='train'):  # this can be used for entire sets
         with redirect_stdout(None):
             self.training_dataset = CocoDataset(root_dir=self.root_dir, set_name=set_name, transform=None)
+        custom_dataset = self.get_custom_data()
         [min_w, min_h] = self.get_min_size(self.training_dataset)
         self.training_dataset.transform = transforms.Compose([Normalizer(),
                                                               Augmenter(),
@@ -135,7 +147,8 @@ class RetinaNet(Initialization):
                                                               Resizer(),
                                                               ])
         # training_dataset = self.get_dataset(set_name=set_name)
-        sampler_train = AspectRatioBasedSampler(self.training_dataset, batch_size=self.batch_size, shuffle=True)
+        sampler_train = AspectRatioBasedSampler(self.training_dataset, batch_size=self.batch_size, shuffle=True,
+                                                custom_order=custom_dataset)
         self.training_dataloader = DataLoader(dataset=self.training_dataset, num_workers=self.workers,
                                               collate_fn=collater, batch_sampler=sampler_train, pin_memory=True)
         self.print_data_statistics(data_loader=self.training_dataloader, set_type='Training')
@@ -245,7 +258,7 @@ class RetinaNet(Initialization):
     
     @staticmethod
     def print_data_statistics(data_loader, set_type):
-        print(colors.yellow('{} images = {:,}'.format(set_type, len(data_loader.dataset.image_ids))))
+        print(colors.yellow('{} images = {:,}'.format(set_type, len(data_loader))))
         print(colors.yellow('{} annotations = {:,}'.format(set_type, len(data_loader.dataset.coco.anns))))
     
     def print_batch_statistics(self):

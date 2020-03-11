@@ -348,12 +348,13 @@ class UnNormalizer(object):
 
 
 class AspectRatioBasedSampler(Sampler):
-    def __init__(self, data_source, batch_size, drop_last=False, shuffle=True):
+    def __init__(self, data_source, batch_size, drop_last=False, shuffle=True, custom_order=None):
         super().__init__(data_source)
         self.data_source = data_source
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.shuffle = shuffle
+        self.custom_order = custom_order
         self.groups = self.group_images()
     
     def __iter__(self):
@@ -367,9 +368,17 @@ class AspectRatioBasedSampler(Sampler):
             return len(self.data_source) // self.batch_size
         else:
             return (len(self.data_source) + self.batch_size - 1) // self.batch_size
+
+    # a = {k: v for k, v in self.data_source.co.catToImgs.items() if k not in (0, 6, 7)}
+    # b = list()
+    # for x in a.values():
+    #     b = b + x
     
     def group_images(self):
-        order = list(range(len(self.data_source)))
+        if self.custom_order is None:
+            order = list(range(len(self.data_source)))
+        else:
+            order = self.custom_order
         if self.shuffle is True:
             random.shuffle(order)
         return [[order[x % len(order)] for x in range(i, i + self.batch_size)] for i in
